@@ -3,22 +3,25 @@ from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
 import os
+import pickle
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+import time
+import uuid
 
 email = "me@gmail.com"
 password = "pass word pass word" # see https://support.google.com/accounts/answer/185833?hl=en on how to create a Google app password
-fpath = "User/filepath/to/old/positions/file.txt"
-url = "https://www.ufl.nyc/careers" # webpage to parse
-name = "div" # name BeautifulSoup uses to identify relevant webpage info
-id = {"class": "sqs-block html-block sqs-block-html"} # id BeautifulSoup uses to identify relevant webpage info
-subject = 'UFL Careers Page Update' # email subject line
 
 def fetch_webpage(url):
     response = requests.get(url)
     return response.text
 
-def send_email(body):
+def send_email(company, body):
     msg = MIMEText(body)
-    msg['Subject'] = subject
+    msg['Subject'] = company + ' Job Board Update'
     msg['From'] = email
     msg['To'] = email
 
@@ -31,26 +34,112 @@ def send_email(body):
         server.close()
     except:
         print("failed to send mail")
+        
+def scrape_job_board(company, url, elem, id):
+    fpath = '/Users/davidatwood/Documents/compsci/petprojects/job_board_web_scraping/txt_files/'+ company + '_roles.txt'
+    
+    # Load previous state if it exists
+    if os.path.exists(fpath):
+        with open(fpath, 'r') as file:
+            previous_roles = file.readlines()
+            previous_roles = [e.strip() for e in previous_roles]
+    else:
+        previous_roles = ''
+        
+    # Fetch the current state of the webpage
+    site = fetch_webpage(url)
+    soup = BeautifulSoup(site, 'html.parser')
+    entries = soup.find_all(elem, id)
+    current_roles = [str(e.text).strip() for e in entries]
 
-# Load previous state if it exists
-if os.path.exists(fpath):
-    with open(fpath, 'r') as file:
-        previous_roles = file.readlines()
-        previous_roles = [e.strip() for e in previous_roles]
-else:
-    previous_roles = ''
+    # Compare the current state with the previous state
+    if current_roles != previous_roles:
+        changes = set(current_roles) - set(previous_roles) # roles that weren't in old version
+        send_email(company, ('\n\n').join(changes)) # send email
 
-# Fetch the current state of the webpage
-site = fetch_webpage(url)
-soup = BeautifulSoup(site, 'html.parser')
-entries = soup.find_all(name, id)
-current_roles = [str(e.text).strip() for e in entries]
+        # Update the previous state
+        with open(fpath, 'w') as file:
+            file.write(('\n').join(current_roles))
+            
 
-# Compare the current state with the previous state
-if current_roles != previous_roles:
-    changes = set(current_roles) - set(previous_roles) # roles that weren't in old version
-    send_email(('\n\n').join(changes)) # send email
+scrape_job_board("UFL", 'https://www.ufl.nyc/careers', "div", {"class": "sqs-block html-block sqs-block-html"}) # company site job board
+scrape_job_board("AllTrails", 'https://jobs.lever.co/alltrails', "h5", {"data-qa": "posting-name"}) # lever job board
+scrape_job_board("Oklo", 'https://boards.greenhouse.io/oklo', "a", {"data-mapped": "true"}) # greenhouse job board
+scrape_job_board("Snow Peak", 'https://boards.greenhouse.io/snowpeak', "a", {"data-mapped": "true"}) # greenhouse job board
+# add add'l links to NON workday job boards
 
-    # Update the previous state
-    with open(fpath, 'w') as file:
-        file.write(('\n').join(current_roles))
+# -------------------------------------------------
+
+# Workday job boards
+# adapted from Workday-scraper by Kartik1745 on GitHub: https://github.com/Kartik1745/Workday-scraper
+try:
+    with open('job_ids_dict.pkl', 'rb') as f:
+        job_ids_dict = pickle.load(f)
+except FileNotFoundError:
+    job_ids_dict = {}
+        
+options = Options()
+options.add_argument('--headless=new')
+driver = webdriver.Chrome(options=options)
+
+wait = WebDriverWait(driver, 10)
+
+company_urls = [
+    'https://patagonia.wd5.myworkdayjobs.com/PWCareers',
+    # add add'l urls
+]  
+
+for company_url in company_urls:
+    if company_url not in job_ids_dict:
+        job_ids_dict[company_url] = []
+
+new_jobs = []
+for company_url in company_urls:
+    jobs_to_add=[]
+    company = ''.join(company_url.split('//')[1].split('.')[0])
+    driver.get(company_url)
+    try:
+        time.sleep(2)
+        wait.until(EC.presence_of_element_located((By.XPATH, '//li[@class="css-1q2dra3"]')))
+        
+        job_elements = driver.find_elements(By.XPATH, '//li[@class="css-1q2dra3"]')
+       
+        for job_element in job_elements:
+            job_title_element = job_element.find_element(By.XPATH, './/h3/a')
+            job_title = job_title_element.text
+            location_element = job_element.find_element(By.XPATH, './/dd[@class="css-129m7dg"][preceding-sibling::dt[contains(text(),"locations")]]')
+            location = location_element.text
+            posted_on_element = job_element.find_element(By.XPATH, './/dd[@class="css-129m7dg"][preceding-sibling::dt[contains(text(),"posted on")]]')
+            posted_on = posted_on_element.text
+            job_id_element = job_element.find_element(By.XPATH, './/ul[@data-automation-id="subtitle"]/li')
+            job_id = job_id_element.text
+            if 'today' in posted_on.lower() or 'yesterday' in posted_on.lower():
+                job_href = job_title_element.get_attribute('href')
+                if job_id not in job_ids_dict[company_url]:
+                    job_ids_dict[company_url].append(job_id)
+                    jobs_to_add.append((job_title, job_href))
+                else:
+                    print(f"Job ID {job_id} already in job_ids_dict")
+    
+    except Exception as e:
+        print(f"An error occurred while processing {company_url}: {str(e)}")
+        continue
+    
+    for job_title, job_href in jobs_to_add:
+            driver.get(job_href)
+            time.sleep(1)
+            job_posting_element = wait.until(EC.presence_of_element_located((By.XPATH, '//div[@data-automation-id="job-posting-details"]')))
+            redis_id = str(uuid.uuid4())
+            job_info = {'company': company, 'job_title': job_title, 'location': location, 'job_href': job_href}
+            new_jobs.append((company, job_title, location, job_href))
+            
+            
+if (new_jobs):
+    formatted_jobs = "\n".join(f"Company: {job[0]}, Job Title: {job[1]}, Location: {job[2]}, Link: {job[3]}" for job in new_jobs)
+    send_email("Workday Job Boards Update", formatted_jobs)
+
+
+# Save job_ids_dict to file
+with open('job_ids_dict.pkl', 'wb') as f:
+    pickle.dump(job_ids_dict, f)
+        
