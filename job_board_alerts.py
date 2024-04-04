@@ -136,7 +136,7 @@ for company_url in company_urls:
             
             
 if (new_jobs):
-    formatted_jobs = "\n\n".join(f"{job[1]} at {job[0]} in {job[2]}, learn more @ {job[3]}" for job in new_jobs)
+    formatted_jobs = "\n\n".join(f"{job[1]} at {str.capitalize(job[0])} in {job[2]}, learn more @ {job[3]}" for job in new_jobs)
     send_email("Workday Job Boards Update", formatted_jobs)
 
 with open(fpath + 'job_ids_dict.pkl', 'wb') as f:
