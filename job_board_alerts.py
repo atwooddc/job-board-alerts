@@ -14,6 +14,7 @@ import uuid
 
 email = "me@gmail.com"
 password = "pass word pass word" # see https://support.google.com/accounts/answer/185833?hl=en on how to create a Google app password
+fpath = 'User/full/path/to/project/' # crontab needs file path to be explicitly defined
 
 def fetch_webpage(url):
     response = requests.get(url)
@@ -36,11 +37,11 @@ def send_email(company, body):
         print("failed to send mail")
         
 def scrape_job_board(company, url, elem, id):
-    fpath = '/Users/davidatwood/Documents/compsci/petprojects/job_board_web_scraping/txt_files/'+ company + '_roles.txt'
+    roles_file = fpath + "txt_files/" + company + '_roles.txt'
     
     # Load previous state if it exists
-    if os.path.exists(fpath):
-        with open(fpath, 'r') as file:
+    if os.path.exists(roles_file):
+        with open(roles_file, 'r') as file:
             previous_roles = file.readlines()
             previous_roles = [e.strip() for e in previous_roles]
     else:
@@ -66,14 +67,14 @@ scrape_job_board("UFL", 'https://www.ufl.nyc/careers', "div", {"class": "sqs-blo
 scrape_job_board("AllTrails", 'https://jobs.lever.co/alltrails', "h5", {"data-qa": "posting-name"}) # lever job board
 scrape_job_board("Oklo", 'https://boards.greenhouse.io/oklo', "a", {"data-mapped": "true"}) # greenhouse job board
 scrape_job_board("Snow Peak", 'https://boards.greenhouse.io/snowpeak', "a", {"data-mapped": "true"}) # greenhouse job board
-# add add'l links to NON workday job boards
+# ...add add'l links to non-Workday job boards
 
 # -------------------------------------------------
 
 # Workday job boards
 # adapted from Workday-scraper by Kartik1745 on GitHub: https://github.com/Kartik1745/Workday-scraper
 try:
-    with open('job_ids_dict.pkl', 'rb') as f:
+    with open(fpath + 'job_ids_dict.pkl', 'rb') as f:
         job_ids_dict = pickle.load(f)
 except FileNotFoundError:
     job_ids_dict = {}
@@ -86,7 +87,7 @@ wait = WebDriverWait(driver, 10)
 
 company_urls = [
     'https://patagonia.wd5.myworkdayjobs.com/PWCareers',
-    # add add'l urls
+    # ...add add'l urls
 ]  
 
 for company_url in company_urls:
@@ -135,11 +136,9 @@ for company_url in company_urls:
             
             
 if (new_jobs):
-    formatted_jobs = "\n".join(f"Company: {job[0]}, Job Title: {job[1]}, Location: {job[2]}, Link: {job[3]}" for job in new_jobs)
+    formatted_jobs = "\n\n".join(f"{job[1]} at {job[0]} in {job[2]}, learn more @ {job[3]}" for job in new_jobs)
     send_email("Workday Job Boards Update", formatted_jobs)
 
-
-# Save job_ids_dict to file
-with open('job_ids_dict.pkl', 'wb') as f:
+with open(fpath + 'job_ids_dict.pkl', 'wb') as f:
     pickle.dump(job_ids_dict, f)
         
